@@ -1,12 +1,12 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 import requests
 from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 
 # === CONFIG ===
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
 EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]  # Gmail App Password
 YELP_API_KEY = st.secrets["YELP_API_KEY"]
@@ -42,12 +42,12 @@ Write a friendly, personalized cold email to a {description} who owns {business_
 Offer a helpful service relevant to their industry. Mention how you found them. Keep it under 100 words.
 """
 
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response['choices'][0]['message']['content']
+    return response.choices[0].message.content
 
 def send_email(to_email, subject, body):
     msg = MIMEText(body, "plain")
