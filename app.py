@@ -11,9 +11,10 @@ EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
 EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]  # Gmail App Password
 
 # === FUNCTIONS ===
-def scrape_google(query):
+def scrape_google(query, radius="local"):
     headers = {"User-Agent": "Mozilla/5.0"}
-    url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    location_modifier = " near me" if radius == "local" else f" within {radius} miles"
+    url = f"https://www.google.com/search?q={query.replace(' ', '+')}{location_modifier.replace(' ', '+')}"
     response = requests.get(url, headers=headers)
     soup = BeautifulSoup(response.text, "html.parser")
 
@@ -23,7 +24,7 @@ def scrape_google(query):
         link = tag.select_one("a")["href"] if tag.select_one("a") else ""
         results.append({"title": title, "url": link})
 
-    return results[:5]
+    return results[:5]  # limit to first 5 for demo
 
 def generate_email(description, business_name):
     prompt = f"""
@@ -56,12 +57,15 @@ st.markdown("""
             background-color: #f0f2f6;
             padding: 2rem;
             border-radius: 1rem;
-            max-width: 600px;
+            max-width: 700px;
             margin: auto;
             box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
         }
         h1 {
             text-align: center;
+        }
+        label {
+            font-weight: bold;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -73,17 +77,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.form("email_form"):
-    description = st.text_input("Who are you targeting (e.g. dentists, personal trainers)?")
-    location = st.text_input("Which location?")
-    offer = st.text_input("What are you offering or emailing them about?")
+    description = st.text_input("Who are you targeting?", placeholder="e.g. dentists, personal trainers")
+    location = st.text_input("Enter a ZIP code or city name for the target location", placeholder="e.g. 27513 or Raleigh")
+    radius = st.selectbox("How broad should the search be?", options=["local", "10", "25", "50", "100"], index=0)
+    offer = st.text_input("What are you offering or emailing them about?", placeholder="e.g. SMMA services, SEO audit")
     subject = st.text_input("Email Subject", "Quick idea for your business")
-    sender_email = st.text_input("Test Recipient Email (for demo)")
+    sender_email = st.text_input("Test Recipient Email (for demo)", placeholder="Your email to receive the test email")
     submit = st.form_submit_button("Generate & Send")
 
 if submit:
     query = f"{description} in {location}"
-    st.write(f"Searching for: {query}")
-    leads = scrape_google(query)
+    st.write(f"Searching for: {query} with radius: {radius}")
+    leads = scrape_google(query, radius)
 
     if leads:
         for lead in leads:
@@ -94,4 +99,4 @@ if submit:
                 send_email(sender_email, subject, email_body)
                 st.success(f"Email sent to test address: {sender_email}")
     else:
-        st.warning("No leads found.")
+        st.warning("No leads found. Try a different ZIP, broader radius, or business category.")
