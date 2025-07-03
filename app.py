@@ -109,7 +109,7 @@ with st.form("email_form"):
         "Where should the test email go?",
         placeholder="Enter your email address to preview the message"
     )
-    submit = st.form_submit_button("Generate & Send")
+    submit = st.form_submit_button("Search & Preview Emails")
 
 # Convert user-friendly radius to search term
 radius_map = {
@@ -126,12 +126,17 @@ if submit:
     leads = search_yelp(description, location, radius_value)
 
     if leads:
-        for lead in leads:
+        selected_lead = st.radio("Select a lead to generate an email:", [lead["title"] for lead in leads])
+        if selected_lead:
+            lead = next(l for l in leads if l["title"] == selected_lead)
             email_body = generate_email(f"a {description} in {location} about {offer}", lead['title'])
             st.write(f"\n---\n### Email to {lead['title']}\n\n{email_body}")
 
-            if sender_email:
-                send_email(sender_email, subject, email_body)
-                st.success(f"Email sent to test address: {sender_email}")
+            if st.button("Send Test Email"):
+                if sender_email:
+                    send_email(sender_email, subject, email_body)
+                    st.success(f"Email sent to test address: {sender_email}")
+                else:
+                    st.error("Please enter a test email address.")
     else:
         st.warning("No leads found. Try a different ZIP, city, or service type.")
