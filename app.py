@@ -77,18 +77,44 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.form("email_form"):
-    description = st.text_input("Who are you targeting?", placeholder="e.g. dentists, personal trainers")
-    location = st.text_input("Enter a ZIP code or city name for the target location", placeholder="e.g. 27513 or Raleigh")
-    radius = st.selectbox("How broad should the search be?", options=["local", "10", "25", "50", "100"], index=0)
-    offer = st.text_input("What are you offering or emailing them about?", placeholder="e.g. SMMA services, SEO audit")
-    subject = st.text_input("Email Subject", "Quick idea for your business")
-    sender_email = st.text_input("Test Recipient Email (for demo)", placeholder="Your email to receive the test email")
+    description = st.text_input(
+        "Who are you trying to reach?",
+        placeholder="Example: dentists, gym owners, landscaping companies"
+    )
+    location = st.text_input(
+        "Location (type a ZIP code, city, or state)",
+        placeholder="Example: 27513, Cary, or North Carolina"
+    )
+    radius = st.selectbox(
+        "How far from the location should we search?",
+        options=["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"],
+        index=0
+    )
+    offer = st.text_input(
+        "What are you offering them?",
+        placeholder="Example: website redesign, Google review service, SEO audit"
+    )
+    subject = st.text_input("Email Subject", "Quick idea to help your business")
+    sender_email = st.text_input(
+        "Where should the test email go?",
+        placeholder="Enter your email address to preview the message"
+    )
     submit = st.form_submit_button("Generate & Send")
+
+# Convert user-friendly radius to search term
+radius_map = {
+    "Same ZIP code only": "local",
+    "10 miles": "10",
+    "25 miles": "25",
+    "50 miles": "50",
+    "100 miles": "100"
+}
 
 if submit:
     query = f"{description} in {location}"
-    st.write(f"Searching for: {query} with radius: {radius}")
-    leads = scrape_google(query, radius)
+    radius_value = radius_map[radius]
+    st.write(f"Searching Google for: '{query}' within {radius.lower()}...")
+    leads = scrape_google(query, radius_value)
 
     if leads:
         for lead in leads:
@@ -99,4 +125,4 @@ if submit:
                 send_email(sender_email, subject, email_body)
                 st.success(f"Email sent to test address: {sender_email}")
     else:
-        st.warning("No leads found. Try a different ZIP, broader radius, or business category.")
+        st.warning("No leads found. Try a different ZIP, city, or service type.")
