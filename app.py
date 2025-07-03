@@ -9,22 +9,32 @@ from email.mime.text import MIMEText
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
 EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]  # Gmail App Password
+YELP_API_KEY = st.secrets["YELP_API_KEY"]
 
 # === FUNCTIONS ===
-def scrape_google(query, radius="local"):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    location_modifier = " near me" if radius == "local" else f" within {radius} miles"
-    url = f"https://www.google.com/search?q={query.replace(' ', '+')}{location_modifier.replace(' ', '+')}"
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
+def search_yelp(term, location, radius_miles):
+    headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
+    url = "https://api.yelp.com/v3/businesses/search"
+    params = {
+        "term": term,
+        "location": location,
+        "radius": int(float(radius_miles) * 1609.34),
+        "limit": 5,
+    }
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code != 200:
+        st.error("Failed to fetch leads from Yelp.")
+        return []
 
+    data = response.json()
     results = []
-    for tag in soup.select("div.tF2Cxc"):
-        title = tag.select_one("h3").text if tag.select_one("h3") else "No title"
-        link = tag.select_one("a")["href"] if tag.select_one("a") else ""
-        results.append({"title": title, "url": link})
-
-    return results[:5]  # limit to first 5 for demo
+    for biz in data["businesses"]:
+        results.append({
+            "title": biz["name"],
+            "url": biz["url"],
+            "email": "Not provided"
+        })
+    return results
 
 def generate_email(description, business_name):
     prompt = f"""
@@ -103,7 +113,7 @@ with st.form("email_form"):
 
 # Convert user-friendly radius to search term
 radius_map = {
-    "Same ZIP code only": "local",
+    "Same ZIP code only": "1",
     "10 miles": "10",
     "25 miles": "25",
     "50 miles": "50",
@@ -111,10 +121,9 @@ radius_map = {
 }
 
 if submit:
-    query = f"{description} in {location}"
     radius_value = radius_map[radius]
-    st.write(f"Searching Google for: '{query}' within {radius.lower()}...")
-    leads = scrape_google(query, radius_value)
+    st.write(f"Searching Yelp for: '{description}' in '{location}' within {radius.lower()}...")
+    leads = search_yelp(description, location, radius_value)
 
     if leads:
         for lead in leads:
