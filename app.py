@@ -117,28 +117,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.form("email_form"):
-    description = st.text_input(
-        "Who do you want to reach?",
-        placeholder="e.g. dentists, gym owners, hiring managers"
-    )
-    location = st.text_input(
-        "Search area (ZIP code, city, or state):",
-        placeholder="e.g. 90210, Dallas, or Florida"
-    )
-    radius = st.selectbox(
-        "Search radius:",
-        options=["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"],
-        index=1
-    )
-    offer = st.text_input(
-        "What are you offering (or looking for)?",
-        placeholder="e.g. graphic design services, internship opportunity, SEO help"
-    )
+    description = st.text_input("Who do you want to reach?", placeholder="e.g. dentists, gym owners, hiring managers")
+    location = st.text_input("Search area (ZIP code, city, or state):", placeholder="e.g. 90210, Dallas, or Florida")
+    radius = st.selectbox("Search radius:", options=["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"], index=1)
+    offer = st.text_input("What are you offering (or looking for)?", placeholder="e.g. graphic design services, internship opportunity, SEO help")
     subject = st.text_input("Subject line for your email:", "Quick idea to grow your business")
-    sender_email = st.text_input(
-        "Your test email (where preview emails will go):",
-        placeholder="your@email.com"
-    )
+    sender_email = st.text_input("Your test email (where preview emails will go):", placeholder="your@email.com")
     submit = st.form_submit_button("Search for Leads")
 
 radius_map = {
@@ -151,19 +135,28 @@ radius_map = {
 
 if submit:
     radius_value = radius_map[radius]
-    st.write(f"🔎 Searching for {description} in {location} within {radius}...")
-    leads = search_yelp(description, location, radius_value)
+    st.session_state.leads = search_yelp(description, location, radius_value)
+    st.session_state.description = description
+    st.session_state.location = location
+    st.session_state.offer = offer
+    st.session_state.subject = subject
+    st.session_state.sender_email = sender_email
 
+if "leads" in st.session_state:
+    leads = st.session_state.leads
     if leads:
         selected_lead = st.radio("Choose a business to generate an email for:", [lead["title"] for lead in leads], key="lead_selection")
         if selected_lead:
             lead = next(l for l in leads if l["title"] == selected_lead)
-            email_body = generate_email(description, lead['title'], offer)
-            edited_email = st.text_area("Generated Email (you can edit this before sending):", email_body, height=200)
+            if "generated_email" not in st.session_state or st.session_state.get("current_lead") != lead["title"]:
+                st.session_state.generated_email = generate_email(st.session_state.description, lead['title'], st.session_state.offer)
+                st.session_state.current_lead = lead["title"]
+
+            edited_email = st.text_area("Generated Email (you can edit this before sending):", st.session_state.generated_email, height=200, key="editable_email")
             if st.button("Send Test Email"):
-                if sender_email:
-                    send_email(sender_email, subject, edited_email)
-                    st.success(f"Email sent to: {sender_email}")
+                if st.session_state.sender_email:
+                    send_email(st.session_state.sender_email, st.session_state.subject, edited_email)
+                    st.success(f"Email sent to: {st.session_state.sender_email}")
                 else:
                     st.error("Please enter a valid email address.")
     else:
