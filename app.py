@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 import requests
 import smtplib
 from email.mime.text import MIMEText
@@ -76,11 +76,18 @@ Write a personalized, short cold email offering {offer} to a business named {bus
 Sound helpful and human. Keep it under 100 words.
 """
 
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except RateLimitError:
+        st.error("OpenAI Rate limit exceeded. Try again shortly.")
+        return ""
+    except Exception as e:
+        st.error("An unexpected error occurred generating the email.")
+        return ""
 
 def send_email(to_email, subject, body):
     msg = MIMEText(body, "plain")
@@ -146,18 +153,21 @@ if "leads" in st.session_state:
     leads = st.session_state.leads
     if leads:
         selected_lead = st.radio("Choose a business to generate an email for:", [lead["title"] for lead in leads], key="lead_selection")
-        if selected_lead:
+        st.session_state.current_lead = selected_lead
+        if st.button("Generate Email"):
             lead = next(l for l in leads if l["title"] == selected_lead)
-            if "generated_email" not in st.session_state or st.session_state.get("current_lead") != lead["title"]:
-                st.session_state.generated_email = generate_email(st.session_state.description, lead['title'], st.session_state.offer)
-                st.session_state.current_lead = lead["title"]
+            generated = generate_email(st.session_state.description, lead['title'], st.session_state.offer)
+            st.session_state.generated_email = generated
 
-            edited_email = st.text_area("Generated Email (you can edit this before sending):", st.session_state.generated_email, height=200, key="editable_email")
-            if st.button("Send Test Email"):
-                if st.session_state.sender_email:
-                    send_email(st.session_state.sender_email, st.session_state.subject, edited_email)
-                    st.success(f"Email sent to: {st.session_state.sender_email}")
-                else:
-                    st.error("Please enter a valid email address.")
-    else:
-        st.warning("❌ No leads found. Try adjusting your location or search type.")
+    if "generated_email" in st.session_state and st.session_state.generated_email:
+        edited_email = st.text_area("Generated Email (you can edit this before sending):", st.session_state.generated_email, height=200, key="editable_email")
+        if st.button("Send Test Email"):
+            if st.session_state.sender_email:
+                send_email(st.session_state.sender_email, st.session_state.subject, edited_email)
+                st.success(f"Email sent to: {st.session_state.sender_email}")
+            else:
+                st.error("Please enter a valid email address.")
+    elif "leads" in st.session_state and not st.session_state.generated_email:
+        st.info("Select a lead and click 'Generate Email' to preview your message.")
+else:
+    st.warning("❌ No leads found. Try adjusting your location or search type.")
