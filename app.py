@@ -47,32 +47,32 @@ def classify_use_case(description, offer):
     else:
         return "general"
 
-def generate_email(description, business_name, offer):
+def generate_email(description, business_name, offer, user_name):
     use_case = classify_use_case(description, offer)
 
     if use_case == "internship":
         prompt = f"""
-Write a short, polite cold email from a college student seeking an internship at a company called {business_name}. 
+Write a short, polite cold email from a college student named {user_name} seeking an internship at a company called {business_name}. 
 Mention interest in the field, eagerness to learn, and ask for a quick conversation. Keep it under 100 words.
 """
     elif use_case == "freelancer":
         prompt = f"""
-Write a friendly cold outreach email offering freelance {offer} services to a business called {business_name}. 
+Write a friendly cold outreach email from {user_name}, offering freelance {offer} services to a business called {business_name}. 
 Keep it personal, benefit-driven, and under 100 words.
 """
     elif use_case == "agency":
         prompt = f"""
-Write a results-focused cold email from an agency offering {offer} to {business_name}. 
+Write a results-focused cold email from an agency representative named {user_name}, offering {offer} to {business_name}. 
 Include a soft CTA and sound professional but not robotic.
 """
     elif use_case == "startup":
         prompt = f"""
-Write a casual email suggesting a potential partnership between a startup and {business_name}. 
+Write a casual email suggesting a potential partnership between a startup and {business_name}, written by {user_name}. 
 Mention what the startup offers and how it could help. Under 100 words.
 """
     else:
         prompt = f"""
-Write a personalized, short cold email offering {offer} to a business named {business_name}. 
+Write a personalized, short cold email from {user_name} offering {offer} to a business named {business_name}. 
 Sound helpful and human. Keep it under 100 words.
 """
 
@@ -124,6 +124,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 with st.form("email_form"):
+    user_name = st.text_input("Your Name:", placeholder="e.g. John Doe")
     description = st.text_input("Who do you want to reach?", placeholder="e.g. dentists, gym owners, hiring managers")
     location = st.text_input("Search area (ZIP code, city, or state):", placeholder="e.g. 90210, Dallas, or Florida")
     radius = st.selectbox("Search radius:", options=["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"], index=1)
@@ -148,6 +149,7 @@ if submit:
     st.session_state.offer = offer
     st.session_state.subject = subject
     st.session_state.sender_email = sender_email
+    st.session_state.user_name = user_name
 
 if "leads" in st.session_state:
     leads = st.session_state.leads
@@ -156,7 +158,7 @@ if "leads" in st.session_state:
         st.session_state.current_lead = selected_lead
         if st.button("Generate Email"):
             lead = next(l for l in leads if l["title"] == selected_lead)
-            generated = generate_email(st.session_state.description, lead['title'], st.session_state.offer)
+            generated = generate_email(st.session_state.description, lead['title'], st.session_state.offer, st.session_state.user_name)
             st.session_state.generated_email = generated
 
     if "generated_email" in st.session_state and st.session_state.generated_email:
