@@ -34,7 +34,6 @@ def fetch_business_context(business_id):
         address = ", ".join(data.get("location", {}).get("display_address", []))
         phone = data.get("phone", "N/A")
         categories = ", ".join([c["title"] for c in data.get("categories", [])])
-        # Google search link
         query = requests.utils.quote(f"{title} {address} official website")
         context_url = f"https://www.google.com/search?q={query}"
         return {"title": title, "address": address, "phone": phone, "categories": categories, "url": context_url}
@@ -112,7 +111,7 @@ Write a personalized, short cold email from {user_name} offering {offer} to {bus
     except RateLimitError:
         st.error("Rate limit, try again later.")
         return ""
-    except Exception:
+    except:
         st.error("Error generating email.")
         return ""
 
@@ -125,35 +124,50 @@ def send_email(to, subj, body):
         s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
         s.send_message(msg)
 
-# === UI ===
-st.set_page_config(page_title="AI Cold Email Generator")
+# === STREAMLIT UI ===
+st.set_page_config(page_title="AI Cold Email Generator", layout="centered")
 st.markdown("""
 <style>
-.main {background: #f0f2f6; padding: 2rem; border-radius: 1rem; max-width: 700px; margin: auto;}
-h1 {text-align: center;}
+    .main {
+        background-color: #f0f2f6;
+        padding: 2rem;
+        border-radius: 1rem;
+        max-width: 700px;
+        margin: auto;
+        box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+    }
+    h1 { text-align: center; }
 </style>
 """, unsafe_allow_html=True)
+
 st.markdown("""
 <div class="main">
   <h1>🚀 Smart Cold Email Builder</h1>
-  <p>Enter details below to find leads and craft emails.</p>
+  <p style='text-align:center;'>Enter who you're trying to reach and what you're offering. We'll find local leads and write the emails for you.</p>
 </div>
 """, unsafe_allow_html=True)
 
-with st.form("lead_form"):
-    user_name = st.text_input("Your Name:")
-    description = st.text_input("Who to reach? (e.g., dentists)")
-    location = st.text_input("Location (ZIP, city, state)")
-    radius = st.selectbox("Radius:", ["1","10","25","50","100"])
-    offer = st.text_input("Your Offer:")
-    subject = st.text_input("Email Subject:", "Quick idea to grow your business")
-    sender_email = st.text_input("Test email to send preview:")
-    search = st.form_submit_button("Search Leads")
+with st.form("email_form"):
+    user_name = st.text_input("Your Name:", placeholder="e.g. John Doe")
+    description = st.text_input("Who do you want to reach?", placeholder="e.g. dentists, gym owners, hiring managers")
+    location = st.text_input("Search area (ZIP code, city, or state):", placeholder="e.g. 90210, Dallas, or Florida")
+    radius = st.selectbox("Search radius:", ["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"], index=1)
+    offer = st.text_input("What are you offering (or looking for)?", placeholder="e.g. graphic design services, internship opportunity, SEO help")
+    subject = st.text_input("Subject line for your email:", "Quick idea to grow your business")
+    sender_email = st.text_input("Your test email (where preview emails will go):", placeholder="your@email.com")
+    submit = st.form_submit_button("Search for Leads")
 
-radius_map = {"1":"1","10":"10","25":"25","50":"50","100":"100"}
+radius_map = {
+    "Same ZIP code only": "1",
+    "10 miles": "10",
+    "25 miles": "25",
+    "50 miles": "50",
+    "100 miles": "100"
+}
 
-if search:
-    st.session_state.leads = search_yelp(description, location, radius_map[radius])
+if submit:
+    radius_value = radius_map[radius]
+    st.session_state.leads = search_yelp(description, location, radius_value)
     st.session_state.user_name = user_name
     st.session_state.description = description
     st.session_state.offer = offer
@@ -163,7 +177,6 @@ if search:
 if "leads" in st.session_state:
     leads = st.session_state.leads
     if leads:
-        # Display context for each lead before generation
         for lead in leads:
             st.markdown(f"### 🏢 {lead['title']}")
             st.write(f"📍 {lead['address']}")
