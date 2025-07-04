@@ -155,14 +155,14 @@ if submit:
     leads = search_yelp(description, location, radius_value)
 
     if leads:
-        selected_lead = st.radio("Choose a business to generate an email for:", [lead["title"] for lead in leads])
+        selected_lead = st.radio("Choose a business to generate an email for:", [lead["title"] for lead in leads], key="lead_selection")
         if selected_lead:
             lead = next(l for l in leads if l["title"] == selected_lead)
             email_body = generate_email(description, lead['title'], offer)
-            st.text_area("Generated Email:", email_body, height=150)
+            edited_email = st.text_area("Generated Email (you can edit this before sending):", email_body, height=200)
             if st.button("Send Test Email"):
                 if sender_email:
-                    send_email(sender_email, subject, email_body)
+                    send_email(sender_email, subject, edited_email)
                     st.success(f"Email sent to: {sender_email}")
                 else:
                     st.error("Please enter a valid email address.")
