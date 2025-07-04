@@ -19,17 +19,19 @@ def get_coordinates(location):
 
 def generate_location_points(center_coords, radius_miles):
     offsets = [
-        (0, 0),
-        (0.15, 0),
-        (-0.15, 0),
-        (0, 0.15),
-        (0, -0.15),
-        (0.1, 0.1),
-        (-0.1, -0.1),
-        (0.1, -0.1),
-        (-0.1, 0.1)
+        (0, 0), (0.15, 0), (-0.15, 0), (0, 0.15), (0, -0.15),
+        (0.1, 0.1), (-0.1, -0.1), (0.1, -0.1), (-0.1, 0.1)
     ]
     return [(center_coords[0] + dx, center_coords[1] + dy) for dx, dy in offsets]
+
+def fetch_business_website(business_id):
+    headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
+    url = f"https://api.yelp.com/v3/businesses/{business_id}"
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        data = response.json()
+        return data.get("url", ""), data.get("name", ""), data.get("location", {}).get("display_address", []), data.get("phone", ""), data.get("coordinates", {}), data.get("photos", []), data.get("hours", []), data.get("categories", []), data.get("location", {}).get("city", ""), data.get("location", {}).get("state", ""), data.get("location", {}).get("zip_code", ""), data.get("location", {}).get("country", ""), data.get("location", {}).get("address1", ""), data.get("url", "")
+    return "", "", "", "", {}, [], [], [], "", "", "", "", "", ""
 
 def search_yelp(term, location, radius_miles):
     headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
@@ -40,10 +42,7 @@ def search_yelp(term, location, radius_miles):
         st.error("Could not determine location coordinates.")
         return []
 
-    if float(radius_miles) <= 25:
-        coords_list = [center_coords]
-    else:
-        coords_list = generate_location_points(center_coords, float(radius_miles))
+    coords_list = [center_coords] if float(radius_miles) <= 25 else generate_location_points(center_coords, float(radius_miles))
 
     seen_titles = set()
     for coords in coords_list:
@@ -61,9 +60,10 @@ def search_yelp(term, location, radius_miles):
         for biz in data.get("businesses", []):
             if biz["name"] not in seen_titles:
                 seen_titles.add(biz["name"])
+                website_url = fetch_business_website(biz["id"])[13] or biz["url"]
                 results.append({
                     "title": biz["name"],
-                    "url": biz["url"],
+                    "url": website_url,
                     "email": "Not provided"
                 })
     if not results:
@@ -85,7 +85,6 @@ def classify_use_case(description, offer):
 
 def generate_email(description, business_name, offer, user_name):
     use_case = classify_use_case(description, offer)
-
     if use_case == "internship":
         prompt = f"""
 Write a short, polite cold email from a college student named {user_name} seeking an internship at a company called {business_name}. 
@@ -193,7 +192,7 @@ if "leads" in st.session_state:
         selected_lead = st.radio("Choose a business to generate an email for:", [f"{lead['title']} ({lead['url']})" for lead in leads], key="lead_selection")
         st.session_state.current_lead = selected_lead
         if st.button("Generate Email"):
-            lead_name = selected_lead.split(" (")[0]  # Get just the name
+            lead_name = selected_lead.split(" (")[0]
             lead = next(l for l in leads if l["title"] == lead_name)
             generated = generate_email(st.session_state.description, lead['title'], st.session_state.offer, st.session_state.user_name)
             st.session_state.generated_email = generated
