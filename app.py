@@ -3,6 +3,7 @@ from openai import OpenAI, RateLimitError
 import requests
 import smtplib
 from email.mime.text import MIMEText
+from geopy.geocoders import Nominatim
 
 # === CONFIG ===
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -12,7 +13,6 @@ YELP_API_KEY = st.secrets["YELP_API_KEY"]
 
 # === FUNCTIONS ===
 def get_coordinates(location):
-    from geopy.geocoders import Nominatim
     geolocator = Nominatim(user_agent="cold-email-ai")
     loc = geolocator.geocode(location)
     return (loc.latitude, loc.longitude) if loc else None
@@ -24,193 +24,174 @@ def generate_location_points(center_coords, radius_miles):
     ]
     return [(center_coords[0] + dx, center_coords[1] + dy) for dx, dy in offsets]
 
-def fetch_business_website(business_id):
+def fetch_business_context(business_id):
     headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
     url = f"https://api.yelp.com/v3/businesses/{business_id}"
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        data = response.json()
-        name = data.get("name", "")
-        address = " ".join(data.get("location", {}).get("display_address", []))
-        website_search_url = f"https://www.google.com/search?q={requests.utils.quote(name + ' ' + address)}"
-        return website_search_url, name, data.get("location", {}).get("display_address", []), data.get("phone", ""), data.get("coordinates", {}), data.get("photos", []), data.get("hours", []), data.get("categories", []), data.get("location", {}).get("city", ""), data.get("location", {}).get("state", ""), data.get("location", {}).get("zip_code", ""), data.get("location", {}).get("country", ""), data.get("location", {}).get("address1", ""), website_search_url
-    return "", "", "", "", {}, [], [], [], "", "", "", "", "", ""
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        title = data.get("name", "")
+        address = ", ".join(data.get("location", {}).get("display_address", []))
+        phone = data.get("phone", "N/A")
+        categories = ", ".join([c["title"] for c in data.get("categories", [])])
+        # Google search link
+        query = requests.utils.quote(f"{title} {address} official website")
+        context_url = f"https://www.google.com/search?q={query}"
+        return {"title": title, "address": address, "phone": phone, "categories": categories, "url": context_url}
+    return {"title": business_id, "address": "N/A", "phone": "N/A", "categories": "N/A", "url": ""}
 
 def search_yelp(term, location, radius_miles):
     headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
-    url = "https://api.yelp.com/v3/businesses/search"
-    results = []
-    center_coords = get_coordinates(location)
-    if not center_coords:
+    api_url = "https://api.yelp.com/v3/businesses/search"
+    leads = []
+    coords = get_coordinates(location)
+    if not coords:
         st.error("Could not determine location coordinates.")
         return []
-
-    coords_list = [center_coords] if float(radius_miles) <= 25 else generate_location_points(center_coords, float(radius_miles))
-
-    seen_titles = set()
-    for coords in coords_list:
-        params = {
-            "term": term,
-            "latitude": coords[0],
-            "longitude": coords[1],
-            "radius": 40000,
-            "limit": 5,
-        }
-        response = requests.get(url, headers=headers, params=params)
-        if response.status_code != 200:
+    centers = [coords] if float(radius_miles) <= 25 else generate_location_points(coords, float(radius_miles))
+    seen = set()
+    for lat, lon in centers:
+        params = {"term": term, "latitude": lat, "longitude": lon, "radius": 40000, "limit": 5}
+        r = requests.get(api_url, headers=headers, params=params)
+        if r.status_code != 200:
             continue
-        data = response.json()
-        for biz in data.get("businesses", []):
-            if biz["name"] not in seen_titles:
-                seen_titles.add(biz["name"])
-                website_url = fetch_business_website(biz["id"])[13] or biz["url"]
-                results.append({
-                    "title": biz["name"],
-                    "url": website_url,
+        for biz in r.json().get("businesses", []):
+            if biz["id"] not in seen:
+                seen.add(biz["id"])
+                ctx = fetch_business_context(biz["id"])
+                leads.append({
+                    "id": biz["id"],
+                    "title": ctx["title"],
+                    "url": ctx["url"],
+                    "address": ctx["address"],
+                    "phone": ctx["phone"],
+                    "categories": ctx["categories"],
                     "email": "Not provided"
                 })
-    if not results:
-        st.warning("❌ No leads found. Try adjusting your location or search type.")
-    return results
+    if not leads:
+        st.warning("❌ No leads found. Try adjusting your search criteria.")
+    return leads
 
 def classify_use_case(description, offer):
     combo = f"{description} {offer}".lower()
     if "internship" in combo or "student" in combo:
         return "internship"
-    elif "freelancer" in combo or "graphic design" in combo or "copywriting" in combo:
+    if "freelancer" in combo or "graphic design" in combo:
         return "freelancer"
-    elif "agency" in combo or "smm" in combo or "seo" in combo:
+    if "agency" in combo or "seo" in combo:
         return "agency"
-    elif "startup" in combo or "partnership" in combo:
+    if "startup" in combo or "partnership" in combo:
         return "startup"
-    else:
-        return "general"
+    return "general"
 
 def generate_email(description, business_name, offer, user_name):
-    use_case = classify_use_case(description, offer)
-    if use_case == "internship":
+    uc = classify_use_case(description, offer)
+    if uc == "internship":
         prompt = f"""
-Write a short, polite cold email from a college student named {user_name} seeking an internship at a company called {business_name}. 
-Mention interest in the field, eagerness to learn, and ask for a quick conversation. Keep it under 100 words.
+Write a short, polite cold email from a college student named {user_name} seeking an internship at {business_name}. Under 100 words.
 """
-    elif use_case == "freelancer":
+    elif uc == "freelancer":
         prompt = f"""
-Write a friendly cold outreach email from {user_name}, offering freelance {offer} services to a business called {business_name}. 
-Keep it personal, benefit-driven, and under 100 words.
+Write a friendly cold outreach email from {user_name}, offering freelance {offer} to {business_name}. Under 100 words.
 """
-    elif use_case == "agency":
+    elif uc == "agency":
         prompt = f"""
-Write a results-focused cold email from an agency representative named {user_name}, offering {offer} to {business_name}. 
-Include a soft CTA and sound professional but not robotic.
+Write a results-focused email from agency rep {user_name}, offering {offer} to {business_name}. Under 100 words.
 """
-    elif use_case == "startup":
+    elif uc == "startup":
         prompt = f"""
-Write a casual email suggesting a potential partnership between a startup and {business_name}, written by {user_name}. 
-Mention what the startup offers and how it could help. Under 100 words.
+Write a casual partnership email from {user_name} to {business_name}, under 100 words.
 """
     else:
         prompt = f"""
-Write a personalized, short cold email from {user_name} offering {offer} to a business named {business_name}. 
-Sound helpful and human. Keep it under 100 words.
+Write a personalized, short cold email from {user_name} offering {offer} to {business_name}. Under 100 words.
 """
-
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
+        res = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role":"user","content":prompt}])
+        return res.choices[0].message.content
     except RateLimitError:
-        st.error("OpenAI Rate limit exceeded. Try again shortly.")
+        st.error("Rate limit, try again later.")
         return ""
-    except Exception as e:
-        st.error("An unexpected error occurred generating the email.")
+    except Exception:
+        st.error("Error generating email.")
         return ""
 
-def send_email(to_email, subject, body):
-    msg = MIMEText(body, "plain")
-    msg["Subject"] = subject
+def send_email(to, subj, body):
+    msg = MIMEText(body)
+    msg["Subject"] = subj
     msg["From"] = EMAIL_ADDRESS
-    msg["To"] = to_email
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        server.send_message(msg)
+    msg["To"] = to
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+        s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        s.send_message(msg)
 
-# === STREAMLIT UI ===
-st.set_page_config(page_title="AI Cold Email Generator", layout="centered")
+# === UI ===
+st.set_page_config(page_title="AI Cold Email Generator")
 st.markdown("""
 <style>
-    .main {
-        background-color: #f0f2f6;
-        padding: 2rem;
-        border-radius: 1rem;
-        max-width: 700px;
-        margin: auto;
-        box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-    }
-    h1 {
-        text-align: center;
-    }
+.main {background: #f0f2f6; padding: 2rem; border-radius: 1rem; max-width: 700px; margin: auto;}
+h1 {text-align: center;}
 </style>
 """, unsafe_allow_html=True)
-
 st.markdown("""
 <div class="main">
-    <h1>🚀 Smart Cold Email Builder</h1>
-    <p style='text-align:center;'>Enter who you're trying to reach and what you're offering. We'll find local leads and write the emails for you.</p>
+  <h1>🚀 Smart Cold Email Builder</h1>
+  <p>Enter details below to find leads and craft emails.</p>
 </div>
 """, unsafe_allow_html=True)
 
-with st.form("email_form"):
-    user_name = st.text_input("Your Name:", placeholder="e.g. John Doe")
-    description = st.text_input("Who do you want to reach?", placeholder="e.g. dentists, gym owners, hiring managers")
-    location = st.text_input("Search area (ZIP code, city, or state):", placeholder="e.g. 90210, Dallas, or Florida")
-    radius = st.selectbox("Search radius:", options=["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"], index=1)
-    offer = st.text_input("What are you offering (or looking for)?", placeholder="e.g. graphic design services, internship opportunity, SEO help")
-    subject = st.text_input("Subject line for your email:", "Quick idea to grow your business")
-    sender_email = st.text_input("Your test email (where preview emails will go):", placeholder="your@email.com")
-    submit = st.form_submit_button("Search for Leads")
+with st.form("lead_form"):
+    user_name = st.text_input("Your Name:")
+    description = st.text_input("Who to reach? (e.g., dentists)")
+    location = st.text_input("Location (ZIP, city, state)")
+    radius = st.selectbox("Radius:", ["1","10","25","50","100"])
+    offer = st.text_input("Your Offer:")
+    subject = st.text_input("Email Subject:", "Quick idea to grow your business")
+    sender_email = st.text_input("Test email to send preview:")
+    search = st.form_submit_button("Search Leads")
 
-radius_map = {
-    "Same ZIP code only": "1",
-    "10 miles": "10",
-    "25 miles": "25",
-    "50 miles": "50",
-    "100 miles": "100"
-}
+radius_map = {"1":"1","10":"10","25":"25","50":"50","100":"100"}
 
-if submit:
-    radius_value = radius_map[radius]
-    st.session_state.leads = search_yelp(description, location, radius_value)
+if search:
+    st.session_state.leads = search_yelp(description, location, radius_map[radius])
+    st.session_state.user_name = user_name
     st.session_state.description = description
-    st.session_state.location = location
     st.session_state.offer = offer
     st.session_state.subject = subject
     st.session_state.sender_email = sender_email
-    st.session_state.user_name = user_name
 
 if "leads" in st.session_state:
     leads = st.session_state.leads
     if leads:
-        selected_lead = st.radio("Choose a business to generate an email for:", [f"{lead['title']} ({lead['url']})" for lead in leads], key="lead_selection")
-        st.session_state.current_lead = selected_lead
+        # Display context for each lead before generation
+        for lead in leads:
+            st.markdown(f"### 🏢 {lead['title']}")
+            st.write(f"📍 {lead['address']}")
+            st.write(f"📞 {lead['phone']}")
+            st.write(f"🔖 {lead['categories']}")
+            st.markdown(f"[🌐 View Website]({lead['url']})")
+            st.markdown("---")
+        selected = st.selectbox("Select a business to email:", [l['title'] for l in leads])
         if st.button("Generate Email"):
-            lead_name = selected_lead.split(" (")[0]
-            lead = next(l for l in leads if l["title"] == lead_name)
-            generated = generate_email(st.session_state.description, lead['title'], st.session_state.offer, st.session_state.user_name)
-            st.session_state.generated_email = generated
+            lead = next(l for l in leads if l['title']==selected)
+            st.session_state.generated_email = generate_email(
+                st.session_state.description,
+                lead['title'],
+                st.session_state.offer,
+                st.session_state.user_name
+            )
             st.session_state.current_url = lead['url']
 
     if "generated_email" in st.session_state and st.session_state.generated_email:
-        st.markdown(f"**Previewing email for:** [{st.session_state.current_lead}]( {st.session_state.current_url} )")
-        edited_email = st.text_area("Generated Email (you can edit this before sending):", st.session_state.generated_email, height=200, key="editable_email")
+        st.markdown(f"**Email preview for [{selected}]({st.session_state.current_url})**")
+        edited = st.text_area("Edit email:", st.session_state.generated_email, height=200)
         if st.button("Send Test Email"):
             if st.session_state.sender_email:
-                send_email(st.session_state.sender_email, st.session_state.subject, edited_email)
-                st.success(f"Email sent to: {st.session_state.sender_email}")
+                send_email(st.session_state.sender_email, st.session_state.subject, edited)
+                st.success(f"Sent to {st.session_state.sender_email}")
             else:
-                st.error("Please enter a valid email address.")
-    elif "leads" in st.session_state and not st.session_state.generated_email:
-        st.info("Select a lead and click 'Generate Email' to preview your message.")
+                st.error("Enter a valid test email.")
+    elif "leads" in st.session_state:
+        st.info("Select a business and click Generate Email.")
 else:
-    st.warning("❌ No leads found. Try adjusting your location or search type.")
+    st.info("Search for leads to get started.")
