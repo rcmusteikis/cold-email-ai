@@ -11,27 +11,63 @@ EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
 YELP_API_KEY = st.secrets["YELP_API_KEY"]
 
 # === FUNCTIONS ===
+def get_coordinates(location):
+    from geopy.geocoders import Nominatim
+    geolocator = Nominatim(user_agent="cold-email-ai")
+    loc = geolocator.geocode(location)
+    return (loc.latitude, loc.longitude) if loc else None
+
+def generate_location_points(center_coords, radius_miles):
+    offsets = [
+        (0, 0),
+        (0.15, 0),
+        (-0.15, 0),
+        (0, 0.15),
+        (0, -0.15),
+        (0.1, 0.1),
+        (-0.1, -0.1),
+        (0.1, -0.1),
+        (-0.1, 0.1)
+    ]
+    return [(center_coords[0] + dx, center_coords[1] + dy) for dx, dy in offsets]
+
 def search_yelp(term, location, radius_miles):
     headers = {"Authorization": f"Bearer {YELP_API_KEY}"}
     url = "https://api.yelp.com/v3/businesses/search"
-    params = {
-        "term": term,
-        "location": location,
-        "radius": int(float(radius_miles) * 1609.34),
-        "limit": 5,
-    }
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code != 200:
-        st.error("Failed to fetch leads from Yelp.")
-        return []
-    data = response.json()
     results = []
-    for biz in data["businesses"]:
-        results.append({
-            "title": biz["name"],
-            "url": biz["url"],
-            "email": "Not provided"
-        })
+    center_coords = get_coordinates(location)
+    if not center_coords:
+        st.error("Could not determine location coordinates.")
+        return []
+
+    if float(radius_miles) <= 25:
+        coords_list = [center_coords]
+    else:
+        coords_list = generate_location_points(center_coords, float(radius_miles))
+
+    seen_titles = set()
+    for coords in coords_list:
+        params = {
+            "term": term,
+            "latitude": coords[0],
+            "longitude": coords[1],
+            "radius": 40000,
+            "limit": 5,
+        }
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != 200:
+            continue
+        data = response.json()
+        for biz in data.get("businesses", []):
+            if biz["name"] not in seen_titles:
+                seen_titles.add(biz["name"])
+                results.append({
+                    "title": biz["name"],
+                    "url": biz["url"],
+                    "email": "Not provided"
+                })
+    if not results:
+        st.warning("❌ No leads found. Try adjusting your location or search type.")
     return results
 
 def classify_use_case(description, offer):
@@ -154,14 +190,17 @@ if submit:
 if "leads" in st.session_state:
     leads = st.session_state.leads
     if leads:
-        selected_lead = st.radio("Choose a business to generate an email for:", [lead["title"] for lead in leads], key="lead_selection")
+        selected_lead = st.radio("Choose a business to generate an email for:", [f"{lead['title']} ({lead['url']})" for lead in leads], key="lead_selection")
         st.session_state.current_lead = selected_lead
         if st.button("Generate Email"):
-            lead = next(l for l in leads if l["title"] == selected_lead)
+            lead_name = selected_lead.split(" (")[0]  # Get just the name
+            lead = next(l for l in leads if l["title"] == lead_name)
             generated = generate_email(st.session_state.description, lead['title'], st.session_state.offer, st.session_state.user_name)
             st.session_state.generated_email = generated
+            st.session_state.current_url = lead['url']
 
     if "generated_email" in st.session_state and st.session_state.generated_email:
+        st.markdown(f"**Previewing email for:** [{st.session_state.current_lead}]( {st.session_state.current_url} )")
         edited_email = st.text_area("Generated Email (you can edit this before sending):", st.session_state.generated_email, height=200, key="editable_email")
         if st.button("Send Test Email"):
             if st.session_state.sender_email:
