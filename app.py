@@ -30,7 +30,10 @@ def fetch_business_website(business_id):
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         data = response.json()
-        return data.get("url", ""), data.get("name", ""), data.get("location", {}).get("display_address", []), data.get("phone", ""), data.get("coordinates", {}), data.get("photos", []), data.get("hours", []), data.get("categories", []), data.get("location", {}).get("city", ""), data.get("location", {}).get("state", ""), data.get("location", {}).get("zip_code", ""), data.get("location", {}).get("country", ""), data.get("location", {}).get("address1", ""), data.get("url", "")
+        name = data.get("name", "")
+        address = " ".join(data.get("location", {}).get("display_address", []))
+        website_search_url = f"https://www.google.com/search?q={requests.utils.quote(name + ' ' + address)}"
+        return website_search_url, name, data.get("location", {}).get("display_address", []), data.get("phone", ""), data.get("coordinates", {}), data.get("photos", []), data.get("hours", []), data.get("categories", []), data.get("location", {}).get("city", ""), data.get("location", {}).get("state", ""), data.get("location", {}).get("zip_code", ""), data.get("location", {}).get("country", ""), data.get("location", {}).get("address1", ""), website_search_url
     return "", "", "", "", {}, [], [], [], "", "", "", "", "", ""
 
 def search_yelp(term, location, radius_miles):
