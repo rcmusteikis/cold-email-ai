@@ -1,14 +1,13 @@
 import streamlit as st
 from openai import OpenAI
 import requests
-from bs4 import BeautifulSoup
 import smtplib
 from email.mime.text import MIMEText
 
 # === CONFIG ===
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 EMAIL_ADDRESS = st.secrets["EMAIL_ADDRESS"]
-EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]  # Gmail App Password
+EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
 YELP_API_KEY = st.secrets["YELP_API_KEY"]
 
 # === FUNCTIONS ===
@@ -25,7 +24,6 @@ def search_yelp(term, location, radius_miles):
     if response.status_code != 200:
         st.error("Failed to fetch leads from Yelp.")
         return []
-
     data = response.json()
     results = []
     for biz in data["businesses"]:
@@ -36,17 +34,52 @@ def search_yelp(term, location, radius_miles):
         })
     return results
 
-def generate_email(description, business_name):
-    prompt = f"""
-Write a friendly, personalized cold email to a {description} who owns {business_name}. 
-Offer a helpful service relevant to their industry. Mention how you found them. Keep it under 100 words.
+def classify_use_case(description, offer):
+    combo = f"{description} {offer}".lower()
+    if "internship" in combo or "student" in combo:
+        return "internship"
+    elif "freelancer" in combo or "graphic design" in combo or "copywriting" in combo:
+        return "freelancer"
+    elif "agency" in combo or "smm" in combo or "seo" in combo:
+        return "agency"
+    elif "startup" in combo or "partnership" in combo:
+        return "startup"
+    else:
+        return "general"
+
+def generate_email(description, business_name, offer):
+    use_case = classify_use_case(description, offer)
+
+    if use_case == "internship":
+        prompt = f"""
+Write a short, polite cold email from a college student seeking an internship at a company called {business_name}. 
+Mention interest in the field, eagerness to learn, and ask for a quick conversation. Keep it under 100 words.
+"""
+    elif use_case == "freelancer":
+        prompt = f"""
+Write a friendly cold outreach email offering freelance {offer} services to a business called {business_name}. 
+Keep it personal, benefit-driven, and under 100 words.
+"""
+    elif use_case == "agency":
+        prompt = f"""
+Write a results-focused cold email from an agency offering {offer} to {business_name}. 
+Include a soft CTA and sound professional but not robotic.
+"""
+    elif use_case == "startup":
+        prompt = f"""
+Write a casual email suggesting a potential partnership between a startup and {business_name}. 
+Mention what the startup offers and how it could help. Under 100 words.
+"""
+    else:
+        prompt = f"""
+Write a personalized, short cold email offering {offer} to a business named {business_name}. 
+Sound helpful and human. Keep it under 100 words.
 """
 
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}]
     )
-
     return response.choices[0].message.content
 
 def send_email(to_email, subject, body):
@@ -54,64 +87,60 @@ def send_email(to_email, subject, body):
     msg["Subject"] = subject
     msg["From"] = EMAIL_ADDRESS
     msg["To"] = to_email
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
         server.send_message(msg)
 
 # === STREAMLIT UI ===
-st.set_page_config(page_title="AI Cold Email Engine", layout="centered")
+st.set_page_config(page_title="AI Cold Email Generator", layout="centered")
 st.markdown("""
-    <style>
-        .main {
-            background-color: #f0f2f6;
-            padding: 2rem;
-            border-radius: 1rem;
-            max-width: 700px;
-            margin: auto;
-            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            text-align: center;
-        }
-        label {
-            font-weight: bold;
-        }
-    </style>
+<style>
+    .main {
+        background-color: #f0f2f6;
+        padding: 2rem;
+        border-radius: 1rem;
+        max-width: 700px;
+        margin: auto;
+        box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+        text-align: center;
+    }
+</style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="main">
-    <h1>🚀 AI Cold Email Website</h1>
+    <h1>🚀 Smart Cold Email Builder</h1>
+    <p style='text-align:center;'>Enter who you're trying to reach and what you're offering. We'll find local leads and write the emails for you.</p>
 </div>
 """, unsafe_allow_html=True)
 
 with st.form("email_form"):
     description = st.text_input(
-        "Who are you trying to reach?",
-        placeholder="Example: dentists, gym owners, landscaping companies"
+        "Who do you want to reach?",
+        placeholder="e.g. dentists, gym owners, hiring managers"
     )
     location = st.text_input(
-        "Location (type a ZIP code, city, or state)",
-        placeholder="Example: 27513, Cary, or North Carolina"
+        "Search area (ZIP code, city, or state):",
+        placeholder="e.g. 90210, Dallas, or Florida"
     )
     radius = st.selectbox(
-        "How far from the location should we search?",
+        "Search radius:",
         options=["Same ZIP code only", "10 miles", "25 miles", "50 miles", "100 miles"],
-        index=0
+        index=1
     )
     offer = st.text_input(
-        "What are you offering them?",
-        placeholder="Example: website redesign, Google review service, SEO audit"
+        "What are you offering (or looking for)?",
+        placeholder="e.g. graphic design services, internship opportunity, SEO help"
     )
-    subject = st.text_input("Email Subject", "Quick idea to help your business")
+    subject = st.text_input("Subject line for your email:", "Quick idea to grow your business")
     sender_email = st.text_input(
-        "Where should the test email go?",
-        placeholder="Enter your email address to preview the message"
+        "Your test email (where preview emails will go):",
+        placeholder="your@email.com"
     )
-    submit = st.form_submit_button("Search & Preview Emails")
+    submit = st.form_submit_button("Search for Leads")
 
-# Convert user-friendly radius to search term
 radius_map = {
     "Same ZIP code only": "1",
     "10 miles": "10",
@@ -122,21 +151,20 @@ radius_map = {
 
 if submit:
     radius_value = radius_map[radius]
-    st.write(f"Searching Yelp for: '{description}' in '{location}' within {radius.lower()}...")
+    st.write(f"🔎 Searching for {description} in {location} within {radius}...")
     leads = search_yelp(description, location, radius_value)
 
     if leads:
-        selected_lead = st.radio("Select a lead to generate an email:", [lead["title"] for lead in leads])
+        selected_lead = st.radio("Choose a business to generate an email for:", [lead["title"] for lead in leads])
         if selected_lead:
             lead = next(l for l in leads if l["title"] == selected_lead)
-            email_body = generate_email(f"a {description} in {location} about {offer}", lead['title'])
-            st.write(f"\n---\n### Email to {lead['title']}\n\n{email_body}")
-
+            email_body = generate_email(description, lead['title'], offer)
+            st.text_area("Generated Email:", email_body, height=150)
             if st.button("Send Test Email"):
                 if sender_email:
                     send_email(sender_email, subject, email_body)
-                    st.success(f"Email sent to test address: {sender_email}")
+                    st.success(f"Email sent to: {sender_email}")
                 else:
-                    st.error("Please enter a test email address.")
+                    st.error("Please enter a valid email address.")
     else:
-        st.warning("No leads found. Try a different ZIP, city, or service type.")
+        st.warning("❌ No leads found. Try adjusting your location or search type.")
